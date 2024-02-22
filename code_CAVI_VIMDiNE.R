@@ -75,3 +75,17 @@ compute_lb = function(y, y_ref, X, Z, alpha_lambda, omega_lambda, mu_beta, sigma
   
 }
 
+compute_ELBO = function(){
+  
+  return(compute_lb() - compute_entropy())
+  
+}
+
+.has_converged = function(ELBO_0, ELBO_1, threshold) abs(ELBO1-ELBO0) < threshold
+
+CAVI_MDINE = function(){
+  alpha_lambda = r0 + 0.5 #Is not updated through variational inference ! 
+  
+}
+
+
