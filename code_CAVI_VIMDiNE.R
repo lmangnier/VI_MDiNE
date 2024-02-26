@@ -210,13 +210,21 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
   while(!.has_converged(res[["ELBO"]][iter], ELBO, threshold)){
     
     
-    mu_beta_prev = res[['mu_beta']][[j]]
-    sigma_beta_prev = res[['sigma_beta']][[j]]
+    mu_beta_prev = res[['mu_beta']][[iter]]
+    sigma_beta_prev = res[['sigma_beta']][[iter]]
     
-    mu_W_prev = res[['mu_W']][[j]]
-    sigma_W_prev = res[['sigma_W']][[j]]
+    mu_W_prev = res[['mu_W']][[iter]]
+    sigma_W_prev = res[['sigma_W']][[iter]]
     
-    omega_lambda = 0.5*(mu_beta_prev^2+sigma_beta_prev)+delta0
+    b_Sigma0_prev = res[["b_Sigma0"]]
+    b_Sigma1_prev = res[["b_Sigma1"]]
+    
+    omega_lambda = 0.5*(mu_beta_prev^2+sigma_beta_prev)+delta0 #J*K 
+    
+    
+    #Check matrix dimension!
+    mu_beta = (t(mu_W_prev[i,])%*% X[i,]) / ((alpha_lambda/omega_lambda) + X[i,] ) #J*K
+    sigma_beta = ((alpha_lambda/omega_lambda)+X)*((1-z[i])*(M+v0+J-1)/(res[["b_Sigma0"]][j,j]) + z[i]*(N-M+v1+J-1)/(res[["b_Sigma1"]][j,j]))
     
     ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
                         alpha_lambda, omega_lambda,
