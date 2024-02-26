@@ -44,70 +44,191 @@ compute_entropy = function(alpha_lambda, omega_lambda,sigma_W,sigma_beta, alpha_
 }
 
 .lb_plambda = function(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0){
-  
-  E_q_lambda = function(fn) {
+  #Alpha, omega, mu and sigma are K*J matrices corresponding to the number of features and species
+  #r0 and delta0 are the hyperparameters
+  E_q_lambda = function(fn, a,b) {
     integrate(function(lambda) {
-      dgamma(lambda, alpha_lambda, omega_lambda) * fn(lambda)
+      dgamma(lambda, a, b) * fn(lambda)
     }, 0, Inf)$value
   }
   
-  return(0.5*E_q_lambda(function(lambda) log(lambda))-0.5*(alpha_lambda/omega_lambda)*(mu_beta^2 + sigma_beta) + 
-    (r0-1)*E_q_lambda(function(lambda) log(lambda))*(log(delta0)- lgamma(r0)) - delta0*(alpha_lambda/omega_lambda))
+  return(sum(sapply(1:ncol(omega_lambda), function(x) {
+    sapply(1:nrow(omega_lambda), function(y) {
+      0.5*(E_q_lambda(function(lambda) log(lambda), alpha_lambda[y,x],omega_lambda[y,x]) -
+             (alpha_lambda[y,x]/omega_lambda[y,x])*(mu_beta[y,x]^2 + sigma_beta[y,x])) + 
+              (r0-1)*E_q_lambda(function(lambda) log(lambda),alpha_lambda[y,x],omega_lambda[y,x])*(log(delta0)- lgamma(r0)) - delta0*(alpha_lambda[y,x]/omega_lambda[y,x])
+    })})))
+ 
 }
 
 .lb_pa = function(alpha_a, beta_a, A){
-  E_q_a = function(fn) {
+  
+  #alpha and beta are vector of size J corresponding to the number of species
+  #A is an scalar hyper parameter
+  E_q_a = function(fn, r,t) {
     integrate(function(a) {
-      dinvgamma(a, alpha_a, beta_a) * fn(a)
+      dinvgamma(a, r, t) * fn(a)
     }, 0, Inf)$value
   }
-  return(-0.5*log(A) - lgamma(0.5)+(0.5+1)*E_q_a(function(a) log(a)) - (1/A)*(alpha_a/beta_a))
+  
+  return(sum(sapply(1:length(alpha_a), function(x){
+    -0.5*log(A) - lgamma(0.5)+(0.5+1)*E_q_a(function(a) log(a), alpha_a[x], beta_a[x]) - (1/A)*(alpha_a[x]/beta_a[x])
+  })))
+  
 }
 
-.lb_pw = function(x,z,mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1,N,M,J, K){
-  return(0.5*((K+1)*(mu_W^2 + sigma_W) + x*(mu_beta^2 + sigma_beta^2) -2*x*mu_beta*mu_W)*
-   ((1-z)*((M+v0+J-1)/b_Sigma0) + z* ((N-M+v1+J-1)/b_Sigma_1)) )
+.lb_pw = function(X,z,mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1,N,M,J, K){
+  
+  
+  pw1 = sum(sapply(1:nrow(X), function(i){
+    sum(sapply(1:nrow(mu_beta), function(j){
+      0.5*((K+1)*(mu_W[i,j]^2 + sigma_W[i,j]))}))}))
+    
+    
+  pw2 = sum(sapply(1:nrow(X), function(i){
+        sum(sapply(1:nrow(mu_beta), function(j){
+          sum(sapply(1:ncol(X), function(k){
+            X[i,k]*(mu_beta[j,k]^2 + sigma_beta[j,k]^2) -2*X[i,k]*mu_beta[j,k]*mu_W[i,j]*
+              ((1-z[i])*((M+v0+J-1)/b_Sigma0[j,j]) + z[i]* ((N-M+v1+J-1)/b_Sigma_1[j,j]))
+      }))
+    }))
+  }))
+  return(pw1+pw2)
 }
+
 
 .lb_pSigma = function(eta, v, B_Sigma, N, J){
-  -0.5*sum(diag(eta))*(N+v+J-1)- (v+J-1)*log(det(B_Sigma)) - J*log(2) -
+  #eta is a diagonal matrix
+  #v is an hyper parameter 
+  #B_Sigma is the scale matrix 
+  #N the number of individuals
+  #J the number of species 
+  return(-0.5*sum(diag(eta)*(N+v+J-1)*solve(B_Sigma))- (v+J-1)*log(det(B_Sigma)) - J*log(2) -
    sum(sapply(1:J, function(x){
      digamma((N+v-J+x)/2)
-   })) + 0.5*v*log(det(eta))-(v*J/2)*log(2) - lgamma(v/2)
+   })) + 0.5*v*log(det(eta))-(v*J/2)*log(2) - lgamma(v/2))
 }
 
-.lb_py = function(y, y_ref, mu_w){
+
+.lb_py = function(Y, y_ref, mu_w){
+  #Y is a matrix of count for each species in each individual
+  #y ref is the reference species 
+  #mu_w is a matrix of size N*J
   
-  return((mu_w - log(sum(exp(mu_w) + 1)))*y - y_ref*log(sum(exp(mu_w) + 1)))
+  return(sum(sapply(1:nrow(Y), function(i){
+    sum(sapply(1:ncol(Y), function(j){
+      (mu_w[i,j] - log(sum(exp(mu_w[i,]) + 1)))*Y[i,j] - y_ref[i]*log(sum(exp(mu_w[i,]) + 1))
+    }))
+  })))
 }
 
-compute_lb = function(y, y_ref, X, Z, alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0,
-                      alpha_a0, beta_a0, A0, alpha_a1, beta_a1, A1, mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1,N,M,J, K,
-                      eta0, B_Sigma0, eta1, B_Sigma1){
+compute_lb = function(Y, y_ref, X, z, alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0,
+                      alpha_a0, beta_a0, alpha_a1, beta_a1,A, mu_W, sigma_W, b_Sigma0,  eta0, b_Sigma_1,  eta1, v0, v1,N,M,J, K){
   
-  .lb_plambda() + .lb_py() + .lb_pSigma() + .lb_pw() + .lb_pa()
+  
+  return(.lb_plambda(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0) +
+    .lb_py(Y, y_ref, mu_W) + 
+    .lb_pSigma(v0, eta0, B_Sigma0, M, J)  + .lb_pSigma(v1, eta1, B_Sigma1, N-M, J)  + 
+    .lb_pw(X, z, mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1, N,M,J,K) + 
+    .lb_pa(alpha_a0, beta_a0, A) + .lb_pa(alpha_a1, beta_a1,A))
   
 }
 
-compute_ELBO = function(){
+compute_ELBO = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
+                        alpha_lambda, omega_lambda,
+                        mu_beta, sigma_beta,
+                        mu_W, sigma_W,
+                        eta0, b_Sigma0,
+                        eta1, b_Sigma1,
+                        alpha_a0, beta_a0,
+                        alpha_a1, beta_a1, N, M, J, K){
   
-  return(compute_lb() - compute_entropy())
+  return(compute_lb(Y, y_ref, X, z,alpha_lambda, omega_lambda,
+                    mu_beta, sigma_beta, r0, delta0,
+                    alpha_a0, beta_a0,
+                    alpha_a1, beta_a1, A,mu_W, sigma_W,
+                    b_Sigma0, eta0, b_Sigma1,  v0,v1,N,M,J,K) - compute_entropy(alpha_lambda, omega_lambda,
+                                                                                sigma_W, sigma_beta, 
+                                                                                alpha_a0, beta_a0,b_Sigma0,
+                                                                                alpha_a1, beta_a1,b_Sigma1,
+                                                                                v0, v1,N,M,K,J))
   
 }
 
 .has_converged = function(ELBO_0, ELBO_1, threshold) abs(ELBO1-ELBO0) < threshold
 
-CAVI_MDINE = function(epsilon){
+CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
+                      init_omega_lambda, 
+                      init_mu_beta, init_sigma_beta, 
+                      init_mu_W, init_sigma_W,
+                      init_eta0, init_b_Sigma0,
+                      init_eta1, init_b_Sigma1,
+                      init_alpha_a0, init_beta_a0,
+                      init_alpha_a1, init_beta_a1, init_epsilon, threshold=1e-06){
   
-  ELBO = c()
-  alpha_lambda = r0 + 0.5 #Is not updated through variational inference ! 
-  i = 1
+  N = length(z)
+  J = ncol(Y)
+  K = ncol(X)
+  M = sum(z==0)
   
-  ELBO[i] = compute_ELBO()
   
-  while(!.has_converged(ELBO[i], ELBO)){
+  if(length(z) != nrow(X) | length(z) != nrow(Y) | nrow(Y) != nrow(X)){
+    stop("z, Y and X do not have the same number of individuals, please check")
+  }
+  alpha_lambda = matrix(rep(r0, J*K), nrow=J, ncol=K) #shape of the Gamma distribution Is not updated through variational inference ! 
+  
+  res = list()
+  
+  res[['alpha_lambda']] = alpha_lambda
+  res[['omega_lambda']] = init_omega_lambda
+  res[['mu_beta']] = init_mu_beta
+  res[['sigma_beta']] = init_sigma_beta
+  res[["mu_W"]] = init_mu_W
+  res[["sigma_W"]] = init_sigma_W
+  res[["eta0"]] = init_eta0
+  res[["b_Sigma0"]] = init_b_Sigma0
+  res[["eta1"]] = init_eta1
+  res[["b_Sigma1"]] = init_b_Sigma1
+  res[["alpha_a0"]] = init_alpha_a0
+  res[["beta_a0"]] = init_beta_a0
+  res[["alpha_a1"]] =init_alpha_a1
+  res[["beta_a1"]] = init_beta_a1
+  res[["epsilon"]] = init_epsilon
+  res[["ELBO"]] = 0
+  
+  iter = 1 
+  
+  ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
+                      alpha_lambda, init_omega_lambda,
+                      init_mu_beta, init_sigma_beta,
+                      init_mu_W, init_sigma_W,
+                      init_eta0, init_b_Sigma0,
+                      init_eta1, init_b_Sigma1,
+                      init_alpha_a0, init_beta_a0,
+                      init_alpha_a1, init_beta_a1, N,M,J,K)
+  
+  while(!.has_converged(res[["ELBO"]][iter], ELBO, threshold)){
     
-  } 
+    
+    mu_beta_prev = res[['mu_beta']][[j]]
+    sigma_beta_prev = res[['sigma_beta']][[j]]
+    
+    mu_W_prev = res[['mu_W']][[j]]
+    sigma_W_prev = res[['sigma_W']][[j]]
+    
+    omega_lambda = 0.5*(mu_beta_prev^2+sigma_beta_prev)+delta0
+    
+    ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
+                        alpha_lambda, omega_lambda,
+                        mu_beta, sigma_beta,
+                        mu_W, sigma_W,
+                        eta0, b_Sigma0,
+                        eta1, b_Sigma1,
+                        alpha_a0, beta_a0,
+                        alpha_a1, beta_a1, N,M,J,K)
+  }
+  
+  
 }
 
 
