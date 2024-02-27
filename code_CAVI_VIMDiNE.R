@@ -44,27 +44,20 @@ compute_entropy = function(alpha_lambda, omega_lambda,sigma_W,sigma_beta, alpha_
 }
 
 .sigma_epsilon = function(epsilon){
-  
-  return(sapply(1:nrow(epsilon), function(i){
-    sapply(1:ncol(epsilon), function(j){
-      epsilon[i,j]/(sum(epsilon[i,])+1)
-  })
-  }))
+  #Epsilon is a n*J matrix
+  return(epsilon/(rowSums(epsilon)+1))
 }
-
 .lambda_epsilon = function(epsilon) 0.5*epsilon*(.sigma_epsilon(epsilon)-0.5)
+
 
 .lb_ph = function(Y, mu_W, sigma_W, epsilon){
   
-  return(sum(sapply(1:nrow(Y), function(i){
-    sum(sapply(1:ncol(Y), function(j){
-      log(.sigma_epsilon(epsilon)) + mu_W[i,j]*y[i,j] - 0.5*mu_W[i,j] - epsilon[i,j]*0.5 -
-        .lambda_epsilon(epsilon)*(mu_W^2+sigma_W-epsilon^2)
-    }))
-  })))
+  return(sum(colSums(log(.sigma_epsilon(epsilon)) + mu_W*Y - 0.5*mu_W - epsilon*0.5 -
+        .lambda_epsilon(epsilon)*(mu_W^2+sigma_W-epsilon^2))))
   
   
 }
+
 .lb_plambda = function(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0){
   #Alpha, omega, mu and sigma are K*J matrices corresponding to the number of features and species
   #r0 and delta0 are the hyperparameters
@@ -144,19 +137,19 @@ compute_entropy = function(alpha_lambda, omega_lambda,sigma_W,sigma_beta, alpha_
   })))
 }
 
-compute_lb = function(Y, y_ref, X, z, alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0,
+compute_lb = function(Y, y_ref, X, z, epsilon, alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0,
                       alpha_a0, beta_a0, alpha_a1, beta_a1,A, mu_W, sigma_W, b_Sigma0,  eta0, b_Sigma_1,  eta1, v0, v1,N,M,J, K){
   
   
   return(.lb_plambda(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0) +
-    .lb_py(Y, y_ref, mu_W) + 
+    .lb_py(Y, y_ref, mu_W) + .lb_ph(Y, mu_W, sigma_W, epsilon)+
     .lb_pSigma(v0, eta0, B_Sigma0, M, J)  + .lb_pSigma(v1, eta1, B_Sigma1, N-M, J)  + 
     .lb_pw(X, z, mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1, N,M,J,K) + 
     .lb_pa(alpha_a0, beta_a0, A) + .lb_pa(alpha_a1, beta_a1,A))
   
 }
 
-compute_ELBO = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
+compute_ELBO = function(Y, y_ref, X, z, epsilon, v0, v1, A, delta0, r0,
                         alpha_lambda, omega_lambda,
                         mu_beta, sigma_beta,
                         mu_W, sigma_W,
@@ -165,7 +158,7 @@ compute_ELBO = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
                         alpha_a0, beta_a0,
                         alpha_a1, beta_a1, N, M, J, K){
   
-  return(compute_lb(Y, y_ref, X, z,alpha_lambda, omega_lambda,
+  return(compute_lb(Y, y_ref, X, z, epsilon, alpha_lambda, omega_lambda,
                     mu_beta, sigma_beta, r0, delta0,
                     alpha_a0, beta_a0,
                     alpha_a1, beta_a1, A,mu_W, sigma_W,
@@ -183,8 +176,8 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
                       init_omega_lambda, 
                       init_mu_beta, init_sigma_beta, 
                       init_mu_W, init_sigma_W,
-                      init_eta0, init_b_Sigma0,
-                      init_eta1, init_b_Sigma1,
+                      init_mu_eta0, init_b_Sigma0,
+                      init_mu_eta1, init_b_Sigma1,
                       init_beta_a0,
                       init_beta_a1, init_epsilon, threshold=1e-06){
   
@@ -210,9 +203,9 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
   res[['sigma_beta']] = init_sigma_beta
   res[["mu_W"]] = init_mu_W
   res[["sigma_W"]] = init_sigma_W
-  res[["eta0"]] = init_eta0
+  res[["mu_eta0"]] = init_mu_eta0
   res[["b_Sigma0"]] = init_b_Sigma0
-  res[["eta1"]] = init_eta1
+  res[["mu_eta1"]] = init_mu_eta1
   res[["b_Sigma1"]] = init_b_Sigma1
   res[["alpha_a0"]] = alpha_a0
   res[["beta_a0"]] = init_beta_a0
@@ -223,7 +216,7 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
   
   iter = 1 
   
-  ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
+  ELBO = compute_ELBO(Y, y_ref, X, z, init_epsilon, v0, v1, A, delta0, r0,
                       alpha_lambda, init_omega_lambda,
                       init_mu_beta, init_sigma_beta,
                       init_mu_W, init_sigma_W,
@@ -244,7 +237,7 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
     b_Sigma0_prev = res[["b_Sigma0"]][[iter]]
     b_Sigma1_prev = res[["b_Sigma1"]][[iter]]
     
-    
+    epsilon_prev =  res[["epsilon"]][[iter]]
     
     omega_lambda = 0.5*(mu_beta_prev^2+sigma_beta_prev)+delta0 #J*K 
     
@@ -253,6 +246,7 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
         sum(sapply(1:N, function(i) (mu_W_prev[i,j]*X[i,k])/((alpha_lambda[j,k]/omega_lambda[j,k]) + X[i,k]^2) ))
       })
     })
+    
     sigma_beta = sapply(1:J, function(j){
       sapply(1:K, function(k){
         sum(sapply(1:N, function(i) ((alpha_lambda[j,k]/omega_lambda[j,k])+X[i,k]^2)*((1-z[i])*(M+v0+J-1)/(res[["b_Sigma0"]][j,j]) + z[i]*(N-M+v1+J-1)/(res[["b_Sigma1"]][j,j])) ))
@@ -262,23 +256,59 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
     beta_a0 = sapply(1:J, function(j) v0*(M+v0+J-1)/b_Sigma0_prev[j,j] + 1/A)
     beta_a1 = sapply(1:J, function(j) v1*(N-M+v1+J-1)/b_Sigma1_prev[j,j] + 1/A)
     
+    mu_eta0 =  diag(0.5*(v0+1)*beta_a0, J,J)
+    mu_eta1 = diag(0.5*(v1+1)*beta_a1, J,J)
     
-    b_Sigma0 = 2*v0*diag(0.5*(v0+1)/beta_a0) + sum(sapply(1:N, function(i) {
+    b_Sigma0 = 2*v0*mu_eta0  + sum(sapply(1:N, function(i) {
       sum(sapply(1:J, function(j) {
         sum(sapply(1:K, function(k) (mu_W_prev[i,j] + X[i,k]*mu_beta[j,k])^2 + sigma_W_prev[i,j] +(X[i,k]*sigma_beta[j,k])^2))
       }))
     }))
     
-    b_Sigma1 = 2*v1*diag(0.5*(v1+1)/beta_a1) + sum(sapply(1:N, function(i) {
+    b_Sigma1 = 2*v1*mu_eta1 + sum(sapply(1:N, function(i) {
       sum(sapply(1:J, function(j) {
         sum(sapply(1:K, function(k) (mu_W_prev[i,j] + X[i,k]*mu_beta[j,k])^2 + sigma_W_prev[i,j] +(X[i,k]*sigma_beta[j,k])^2))
       }))
     }))
     
+    sigma_W = 2*.lambda_epsilon(epsilon_prev) + 
+      sapply(1:N, function(i) {
+        sapply(1:J, function(j){
+          (K+1)*((1-z[i])*((M+v0+J-1)/b_Sigma0[j,j]) + z[i]*((N-M+v1+J-1)/b_Sigma1[j,j]))
+        })
+      })
+        
     
-    epsilon_square = sqrt(mu_W^2 + sigma_W) 
     
-    ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
+    mu_W = ((X%*%t(mu_beta))*sapply(1:N, function(i){
+      sapply(1:J, function(j){
+        ((1-z[i])*((M+v0+J-1)/b_Sigma0[j,j])+z[i]*((N-M+v1+J-1)/b_Sigma1[j,j]))*(Y[i,j] - 0.5)
+      })
+    }))%*%solve(sigma_W)
+    
+    epsilon = sqrt(mu_W^2 + sigma_W) 
+    
+    
+    res[['alpha_lambda']] = alpha_lambda
+    res[['omega_lambda']] = omega_lambda
+    res[['mu_beta']] = mu_beta
+    res[['sigma_beta']] = sigma_beta
+    res[["mu_W"]] = mu_W
+    res[["sigma_W"]] = sigma_W
+    res[["mu_eta0"]] = mu_eta0
+    res[["b_Sigma0"]] = b_Sigma0
+    res[["mu_eta1"]] = mu_eta1
+    res[["b_Sigma1"]] = b_Sigma1
+    res[["alpha_a0"]] = alpha_a0
+    res[["beta_a0"]] = beta_a0
+    res[["alpha_a1"]] =alpha_a1
+    res[["beta_a1"]] = beta_a1
+    res[["epsilon"]] = epsilon
+    res[["ELBO"]] = c(res[["ELBO"]], ELBO)
+    
+    rep = rep+1 
+    
+    ELBO = compute_ELBO(Y, y_ref, X, z, epsilon, v0, v1, A, delta0, r0,
                         alpha_lambda, omega_lambda,
                         mu_beta, sigma_beta,
                         mu_W, sigma_W,
@@ -286,6 +316,8 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
                         eta1, b_Sigma1,
                         alpha_a0, beta_a0,
                         alpha_a1, beta_a1, N,M,J,K)
+    
+    
   }
   
   
