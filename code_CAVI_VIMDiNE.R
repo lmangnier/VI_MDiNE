@@ -43,6 +43,28 @@ compute_entropy = function(alpha_lambda, omega_lambda,sigma_W,sigma_beta, alpha_
     .compute_entropy_a(alpha_a1,B_a1)+.compute_entropy_Sigma(v0, B_Sigma0,M,J)+.compute_entropy_Sigma(v1, B_Sigma1,N-M,J)
 }
 
+.sigma_epsilon = function(epsilon){
+  
+  return(sapply(1:nrow(epsilon), function(i){
+    sapply(1:ncol(epsilon), function(j){
+      epsilon[i,j]/(sum(epsilon[i,])+1)
+  })
+  }))
+}
+
+.lambda_epsilon = function(epsilon) 0.5*epsilon*(.sigma_epsilon(epsilon)-0.5)
+
+.lb_ph = function(Y, mu_W, sigma_W, epsilon){
+  
+  return(sum(sapply(1:nrow(Y), function(i){
+    sum(sapply(1:ncol(Y), function(j){
+      log(.sigma_epsilon(epsilon)) + mu_W[i,j]*y[i,j] - 0.5*mu_W[i,j] - epsilon[i,j]*0.5 -
+        .lambda_epsilon(epsilon)*(mu_W^2+sigma_W-epsilon^2)
+    }))
+  })))
+  
+  
+}
 .lb_plambda = function(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0){
   #Alpha, omega, mu and sigma are K*J matrices corresponding to the number of features and species
   #r0 and delta0 are the hyperparameters
@@ -163,8 +185,8 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
                       init_mu_W, init_sigma_W,
                       init_eta0, init_b_Sigma0,
                       init_eta1, init_b_Sigma1,
-                      init_alpha_a0, init_beta_a0,
-                      init_alpha_a1, init_beta_a1, init_epsilon, threshold=1e-06){
+                      init_beta_a0,
+                      init_beta_a1, init_epsilon, threshold=1e-06){
   
   N = length(z)
   J = ncol(Y)
@@ -175,7 +197,10 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
   if(length(z) != nrow(X) | length(z) != nrow(Y) | nrow(Y) != nrow(X)){
     stop("z, Y and X do not have the same number of individuals, please check")
   }
+  
   alpha_lambda = matrix(rep(r0, J*K), nrow=J, ncol=K) #shape of the Gamma distribution Is not updated through variational inference ! 
+  alpha_a0 = 0.5*(v0+1) #shape of the inverse Gamma distribution Is not updated through variational inference ! 
+  alpha_a1 = 0.5*(v1+1) #shape of the inverse Gamma distribution Is not updated through variational inference ! 
   
   res = list()
   
@@ -189,9 +214,9 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
   res[["b_Sigma0"]] = init_b_Sigma0
   res[["eta1"]] = init_eta1
   res[["b_Sigma1"]] = init_b_Sigma1
-  res[["alpha_a0"]] = init_alpha_a0
+  res[["alpha_a0"]] = alpha_a0
   res[["beta_a0"]] = init_beta_a0
-  res[["alpha_a1"]] =init_alpha_a1
+  res[["alpha_a1"]] =alpha_a1
   res[["beta_a1"]] = init_beta_a1
   res[["epsilon"]] = init_epsilon
   res[["ELBO"]] = 0
@@ -204,8 +229,8 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
                       init_mu_W, init_sigma_W,
                       init_eta0, init_b_Sigma0,
                       init_eta1, init_b_Sigma1,
-                      init_alpha_a0, init_beta_a0,
-                      init_alpha_a1, init_beta_a1, N,M,J,K)
+                      alpha_a0, init_beta_a0,
+                      alpha_a1, init_beta_a1, N,M,J,K)
   
   while(!.has_converged(res[["ELBO"]][iter], ELBO, threshold)){
     
@@ -216,15 +241,42 @@ CAVI_MDINE = function(Y, y_ref, X, z, v0, v1, A, delta0, r0,
     mu_W_prev = res[['mu_W']][[iter]]
     sigma_W_prev = res[['sigma_W']][[iter]]
     
-    b_Sigma0_prev = res[["b_Sigma0"]]
-    b_Sigma1_prev = res[["b_Sigma1"]]
+    b_Sigma0_prev = res[["b_Sigma0"]][[iter]]
+    b_Sigma1_prev = res[["b_Sigma1"]][[iter]]
+    
+    
     
     omega_lambda = 0.5*(mu_beta_prev^2+sigma_beta_prev)+delta0 #J*K 
     
+    mu_beta = sapply(1:J, function(j){
+      sapply(1:K, function(k){
+        sum(sapply(1:N, function(i) (mu_W_prev[i,j]*X[i,k])/((alpha_lambda[j,k]/omega_lambda[j,k]) + X[i,k]^2) ))
+      })
+    })
+    sigma_beta = sapply(1:J, function(j){
+      sapply(1:K, function(k){
+        sum(sapply(1:N, function(i) ((alpha_lambda[j,k]/omega_lambda[j,k])+X[i,k]^2)*((1-z[i])*(M+v0+J-1)/(res[["b_Sigma0"]][j,j]) + z[i]*(N-M+v1+J-1)/(res[["b_Sigma1"]][j,j])) ))
+      })
+    })
     
-    #Check matrix dimension!
-    mu_beta = (t(mu_W_prev[i,])%*% X[i,]) / ((alpha_lambda/omega_lambda) + X[i,] ) #J*K
-    sigma_beta = ((alpha_lambda/omega_lambda)+X)*((1-z[i])*(M+v0+J-1)/(res[["b_Sigma0"]][j,j]) + z[i]*(N-M+v1+J-1)/(res[["b_Sigma1"]][j,j]))
+    beta_a0 = sapply(1:J, function(j) v0*(M+v0+J-1)/b_Sigma0_prev[j,j] + 1/A)
+    beta_a1 = sapply(1:J, function(j) v1*(N-M+v1+J-1)/b_Sigma1_prev[j,j] + 1/A)
+    
+    
+    b_Sigma0 = 2*v0*diag(0.5*(v0+1)/beta_a0) + sum(sapply(1:N, function(i) {
+      sum(sapply(1:J, function(j) {
+        sum(sapply(1:K, function(k) (mu_W_prev[i,j] + X[i,k]*mu_beta[j,k])^2 + sigma_W_prev[i,j] +(X[i,k]*sigma_beta[j,k])^2))
+      }))
+    }))
+    
+    b_Sigma1 = 2*v1*diag(0.5*(v1+1)/beta_a1) + sum(sapply(1:N, function(i) {
+      sum(sapply(1:J, function(j) {
+        sum(sapply(1:K, function(k) (mu_W_prev[i,j] + X[i,k]*mu_beta[j,k])^2 + sigma_W_prev[i,j] +(X[i,k]*sigma_beta[j,k])^2))
+      }))
+    }))
+    
+    
+    epsilon_square = sqrt(mu_W^2 + sigma_W) 
     
     ELBO = compute_ELBO(Y, y_ref, X, z,v0, v1, A, delta0, r0,
                         alpha_lambda, omega_lambda,
