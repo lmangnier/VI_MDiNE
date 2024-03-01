@@ -37,7 +37,7 @@ library(MCMCpack)
 .lb_pa = function(alpha_a, beta_a, A){
   
   #alpha and beta are vector of size J corresponding to the number of species
-  #A is an scalar hyper parameter
+  #A is an vector of hyperparameters
   E_q_a = function(fn, r,t) {
     integrate(function(a) {
       dinvgamma(a, r, t) * fn(a)
@@ -45,7 +45,7 @@ library(MCMCpack)
   }
   
   return(sum(sapply(1:length(alpha_a), function(x){
-    -0.5*log(A) - lgamma(0.5)-(1.5)*E_q_a(function(a) log(a), alpha_a[x], beta_a[x]) - (1/A)*(alpha_a[x]/beta_a[x])
+    -0.5*log(A[x]) - lgamma(0.5)-(1.5)*E_q_a(function(a) log(a), alpha_a[x], beta_a[x]) - (1/A[x])*(alpha_a[x]/beta_a[x])
   })))
   
 }
@@ -86,6 +86,7 @@ library(MCMCpack)
 }
 
 
+
 # .lb_py = function(Y, y_ref, mu_w){
 #   #Y is a matrix of count for each species in each individual
 #   #y ref is the reference species 
@@ -99,13 +100,13 @@ library(MCMCpack)
 # }
 
 compute_lb = function(Y, y_ref, X, z, epsilon, alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0,
-                      alpha_a0, beta_a0, alpha_a1, beta_a1,A, mu_W, sigma_W, b_Sigma0,  eta0, b_Sigma_1,  eta1, v0, v1,N,M,J, K){
+                      alpha_a0, beta_a0, alpha_a1, beta_a1,A, mu_W, sigma_W, b_Sigma0, b_Sigma1, v0, v1,N,M,J, K){
   
   
   return(.lb_plambda(alpha_lambda, omega_lambda, mu_beta, sigma_beta, r0, delta0) +
            .lb_ph(Y, mu_W, sigma_W, epsilon)+
-           .lb_pSigma(alpha_a0, beta_a0,v0, B_Sigma0, M, J)  + .lb_pSigma(alpha_a1, beta_a1, v1, B_Sigma1, N-M, J)  + 
-           .lb_pw(X, z, mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma_1, v0, v1, N,M,J,K) + 
+           .lb_pSigma(alpha_a0, beta_a0,v0, b_Sigma0, M, J)  + .lb_pSigma(alpha_a1, beta_a1, v1, b_Sigma1, N-M, J)  + 
+           .lb_pw(X, z, mu_W, sigma_W, mu_beta, sigma_beta, b_Sigma0, b_Sigma1, v0, v1, N,M,J,K) + 
            .lb_pa(alpha_a0, beta_a0, A) + .lb_pa(alpha_a1, beta_a1,A))
   # .lb_py(Y, y_ref, mu_W)
 }
